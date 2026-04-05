@@ -1,16 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { completionsAPI, statsAPI } from '../services/api';
 import {
+  AlertTriangle,
   BarChart3,
   CheckCircle2,
+  Clock3,
   Filter,
   Flame,
+  ListTodo,
   LogOut,
   Plus,
   RefreshCw,
   Search,
   Settings,
+  Sparkles,
   Target,
   TrendingUp,
   Wifi,
@@ -25,16 +29,131 @@ import AddHabitModal from '../components/AddHabitModal';
 const getHabitStatus = (habit, completedHabitIds) => {
   if (completedHabitIds.has(habit._id)) return 'completed';
 
-  const firstTime = habit?.scheduledTimes?.[0];
+  const firstTime = [...(habit?.scheduledTimes || [])].sort()[0];
   if (!firstTime) return 'pending';
 
-  const [h, m] = firstTime.split(':').map(Number);
-  const scheduledMinutes = h * 60 + m;
+  const scheduledMinutes = toMinutes(firstTime);
+  if (scheduledMinutes === null) return 'pending';
+
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
   if (currentMinutes > scheduledMinutes) return 'overdue';
   return 'upcoming';
+};
+
+const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WORKING_WINDOW_MINUTES = 12;
+const UPCOMING_SOON_MINUTES = 25;
+
+const toMinutes = (time) => {
+  if (typeof time !== 'string') return null;
+  const [hh, mm] = time.split(':').map(Number);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+  return hh * 60 + mm;
+};
+
+const formatScheduleTime = (time) => {
+  if (typeof time !== 'string') return time;
+
+  const [hh, mm] = time.split(':').map(Number);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return time;
+
+  const period = hh >= 12 ? 'PM' : 'AM';
+  const hour12 = hh % 12 || 12;
+  return `${hour12}:${String(mm).padStart(2, '0')} ${period}`;
+};
+
+const formatMinutesDiff = (minutes) => {
+  if (minutes <= 0) return '0 min';
+  if (minutes < 60) return `${minutes} min`;
+
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  if (!remaining) return `${hours} hr`;
+  return `${hours} hr ${remaining} min`;
+};
+
+const getTodayTaskEntries = (habits, completedHabitIds, nowDate) => {
+  const today = WEEK_DAYS[nowDate.getDay()];
+  const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+
+  return habits
+    .flatMap((habit) =>
+      (habit.scheduledTimes || []).map((time) => ({
+        habit,
+        time,
+        minutes: toMinutes(time),
+      }))
+    )
+    .filter((entry) => {
+      if (entry.minutes === null) return false;
+
+      const repeatDays = entry.habit.repeatDays || [];
+      if (!repeatDays.length) return true;
+      return repeatDays.includes(today);
+    })
+    .sort((a, b) => a.minutes - b.minutes)
+    .map((entry) => {
+      const isCompleted = completedHabitIds.has(entry.habit._id);
+
+      return {
+        ...entry,
+        isCompleted,
+        isOverdue: !isCompleted && entry.minutes < nowMinutes,
+      };
+    });
+};
+
+const getWorkingTaskByTime = (timelineEntries, nowMinutes) => {
+  if (!timelineEntries.length) return null;
+
+  const pendingEntries = timelineEntries.filter((entry) => !entry.isCompleted);
+
+  if (!pendingEntries.length) {
+    return {
+      ...timelineEntries[timelineEntries.length - 1],
+      state: 'done',
+      deltaMinutes: 0,
+    };
+  }
+
+  // Always prioritize missed pending tasks from earlier today.
+  const overdueEntries = pendingEntries.filter((entry) => entry.minutes <= nowMinutes);
+  if (overdueEntries.length) {
+    const overdueEntry = overdueEntries[overdueEntries.length - 1];
+    return {
+      ...overdueEntry,
+      state: 'overdue',
+      deltaMinutes: nowMinutes - overdueEntry.minutes,
+    };
+  }
+
+  const nowEntry = pendingEntries.find((entry) => Math.abs(entry.minutes - nowMinutes) <= WORKING_WINDOW_MINUTES);
+  if (nowEntry) {
+    return {
+      ...nowEntry,
+      state: 'working',
+      deltaMinutes: Math.abs(nowEntry.minutes - nowMinutes),
+    };
+  }
+
+  const upcomingEntry = pendingEntries[0];
+  if (upcomingEntry) {
+    const deltaMinutes = upcomingEntry.minutes - nowMinutes;
+
+    return {
+      ...upcomingEntry,
+      state: deltaMinutes <= UPCOMING_SOON_MINUTES ? 'working' : 'upcoming',
+      deltaMinutes,
+    };
+  }
+
+  return {
+    ...timelineEntries[timelineEntries.length - 1],
+    state: 'done',
+    deltaMinutes: 0,
+  };
 };
 
 export default function Dashboard() {
@@ -46,7 +165,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [toast, setToast] = useState(null);
 
   const [completedHabitIds, setCompletedHabitIds] = useState(new Set());
   const [completionByHabitId, setCompletionByHabitId] = useState({});
@@ -58,8 +177,14 @@ export default function Dashboard() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [timeTick, setTimeTick] = useState(Date.now());
+  const workingTaskToastKeyRef = useRef('');
 
   const navigate = useNavigate();
+
+  const showToast = useCallback((type, title, message = '') => {
+    setToast({ id: Date.now(), type, title, message });
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -98,6 +223,7 @@ export default function Dashboard() {
   }, []);
 
   const refreshDashboard = useCallback(async () => {
+    setError('');
     await Promise.all([fetchStats(), fetchTodayCompletions(), fetchHabits()]);
   }, [fetchHabits, fetchStats, fetchTodayCompletions]);
 
@@ -114,10 +240,19 @@ export default function Dashboard() {
   }, [fetchStats]);
 
   useEffect(() => {
-    if (!successMessage) return;
-    const timeout = setTimeout(() => setSuccessMessage(''), 2500);
+    const minuteTimer = setInterval(() => {
+      setTimeTick(Date.now());
+    }, 60000);
+
+    return () => clearInterval(minuteTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+
+    const timeout = setTimeout(() => setToast(null), 2800);
     return () => clearTimeout(timeout);
-  }, [successMessage]);
+  }, [toast]);
 
   const handleLogout = () => {
     logout();
@@ -140,42 +275,45 @@ export default function Dashboard() {
   };
 
   const handleSaveHabit = async (payload) => {
+    const habitName = payload?.name?.trim() || 'Habit';
+
     try {
       setSubmittingHabit(true);
-      setError('');
 
       if (editingHabit?._id) {
         await updateHabit(editingHabit._id, payload);
-        setSuccessMessage('Habit updated');
+        showToast('success', 'Habit updated', habitName);
       } else {
         await createHabit(payload);
-        setSuccessMessage('Habit created');
+        showToast('success', 'Habit created', habitName);
       }
 
       closeModal();
       await refreshDashboard();
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to save habit');
+      showToast('error', 'Save failed', err?.response?.data?.message || 'Failed to save habit');
     } finally {
       setSubmittingHabit(false);
     }
   };
 
   const handleDeleteHabit = async (habitId) => {
+    const habitName = habits.find((habit) => habit._id === habitId)?.name || 'Habit';
+
     try {
-      setError('');
       await deleteHabit(habitId);
-      setSuccessMessage('Habit deleted');
+      showToast('success', 'Habit deleted', habitName);
       await refreshDashboard();
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to delete habit');
+      showToast('error', 'Delete failed', err?.response?.data?.message || 'Failed to delete habit');
     }
   };
 
   const handleCompleteHabit = async (habitId) => {
+    const habitName = habits.find((habit) => habit._id === habitId)?.name || 'Habit';
+
     try {
       setActiveHabitId(habitId);
-      setError('');
 
       const response = await completionsAPI.mark({ habitId });
       const completionId = response?.data?.data?._id;
@@ -193,16 +331,22 @@ export default function Dashboard() {
         }));
       }
 
-      setSuccessMessage(response?.data?.alreadyCompleted ? 'Already completed for today' : 'Habit completed');
+      showToast(
+        response?.data?.alreadyCompleted ? 'info' : 'success',
+        response?.data?.alreadyCompleted ? 'Already completed' : 'Habit completed',
+        habitName
+      );
       await fetchStats();
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to mark habit complete');
+      showToast('error', 'Complete failed', err?.response?.data?.message || 'Failed to mark habit complete');
     } finally {
       setActiveHabitId('');
     }
   };
 
   const handleUndoCompletion = async (habitId) => {
+    const habitName = habits.find((habit) => habit._id === habitId)?.name || 'Habit';
+
     try {
       const completionId = completionByHabitId[habitId];
       if (!completionId) return;
@@ -221,10 +365,10 @@ export default function Dashboard() {
         return next;
       });
 
-      setSuccessMessage('Completion undone');
+      showToast('info', 'Completion undone', habitName);
       await fetchStats();
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to undo completion');
+      showToast('error', 'Undo failed', err?.response?.data?.message || 'Failed to undo completion');
     }
   };
 
@@ -252,6 +396,102 @@ export default function Dashboard() {
     });
   }, [completedHabitIds, habits, searchQuery, statusFilter]);
 
+  const { timelineEntries, workingTask } = useMemo(() => {
+    const currentDate = new Date(timeTick);
+    const nowMinutes = currentDate.getHours() * 60 + currentDate.getMinutes();
+    const todayEntries = getTodayTaskEntries(habits, completedHabitIds, currentDate);
+
+    return {
+      timelineEntries: todayEntries,
+      workingTask: getWorkingTaskByTime(todayEntries, nowMinutes),
+    };
+  }, [habits, completedHabitIds, timeTick]);
+
+  const currentTimeLabel = useMemo(
+    () =>
+      new Date(timeTick).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    [timeTick]
+  );
+
+  const todayTaskSummary = useMemo(() => {
+    const total = timelineEntries.length;
+    const completed = timelineEntries.filter((entry) => entry.isCompleted).length;
+    const overdue = timelineEntries.filter((entry) => entry.isOverdue).length;
+
+    return {
+      total,
+      completed,
+      overdue,
+      pending: Math.max(total - completed, 0),
+    };
+  }, [timelineEntries]);
+
+  const workingTaskMeta = useMemo(() => {
+    if (!workingTask) return null;
+
+    if (workingTask.state === 'working') {
+      return {
+        badge: 'Do This Now',
+        badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+        helperText:
+          workingTask.deltaMinutes === 0
+            ? 'Scheduled for this exact moment'
+            : `Starts in ${formatMinutesDiff(workingTask.deltaMinutes)}`,
+      };
+    }
+
+    if (workingTask.state === 'upcoming') {
+      return {
+        badge: 'Upcoming Task',
+        badgeClass: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+        helperText: `Starts in ${formatMinutesDiff(workingTask.deltaMinutes)}`,
+      };
+    }
+
+    if (workingTask.state === 'overdue') {
+      return {
+        badge: 'Overdue Task',
+        badgeClass: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+        helperText: `Overdue by ${formatMinutesDiff(workingTask.deltaMinutes)}`,
+      };
+    }
+
+    return {
+      badge: 'All Done Today',
+      badgeClass: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
+      helperText: 'All pending habits for today are completed',
+    };
+  }, [workingTask]);
+
+  useEffect(() => {
+    const workingTaskKey = workingTask ? `${workingTask.state}:${workingTask.habit._id}:${workingTask.time}` : 'none';
+
+    if (!workingTaskToastKeyRef.current) {
+      workingTaskToastKeyRef.current = workingTaskKey;
+      return;
+    }
+
+    if (workingTaskToastKeyRef.current !== workingTaskKey && workingTask && workingTaskMeta) {
+      const titleByState = {
+        overdue: 'Overdue task highlighted',
+        working: 'Focus task updated',
+        upcoming: 'Next task changed',
+        done: 'All tasks completed',
+      };
+
+      showToast(
+        'info',
+        titleByState[workingTask.state] || 'Task update',
+        `${workingTask.habit.name} • ${formatScheduleTime(workingTask.time)}`
+      );
+    }
+
+    workingTaskToastKeyRef.current = workingTaskKey;
+  }, [workingTask, workingTaskMeta, showToast]);
+
   const headerBadge = useMemo(() => {
     if (!isOnline) {
       return {
@@ -267,6 +507,14 @@ export default function Dashboard() {
       className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
     };
   }, [isOnline, pendingActions]);
+
+  const workingTaskCompletionId = workingTask ? completionByHabitId[workingTask.habit._id] : null;
+  const toastClassName =
+    toast?.type === 'success'
+      ? 'border-emerald-300/70 bg-emerald-100/95 text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-900/90 dark:text-emerald-100'
+      : toast?.type === 'error'
+        ? 'border-rose-300/70 bg-rose-100/95 text-rose-800 dark:border-rose-700/60 dark:bg-rose-900/90 dark:text-rose-100'
+        : 'border-sky-300/70 bg-sky-100/95 text-sky-800 dark:border-sky-700/60 dark:bg-sky-900/90 dark:text-sky-100';
 
   return (
     <div className="min-h-screen">
@@ -298,6 +546,13 @@ export default function Dashboard() {
               Settings
             </button>
             <button
+              onClick={() => navigate('/task-manager')}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <ListTodo className="h-4 w-4" />
+              Task Manager
+            </button>
+            <button
               onClick={handleLogout}
               className="inline-flex items-center gap-2 rounded-xl border border-rose-300/60 bg-rose-100/70 px-4 py-2 text-rose-700 transition hover:bg-rose-200/70 dark:border-rose-700/50 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/45"
             >
@@ -317,40 +572,136 @@ export default function Dashboard() {
             <RefreshCw className="h-4 w-4" />
             Refresh
           </button>
-
-          <div className="relative min-w-55 flex-1 sm:flex-none">
-            <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-xl border border-slate-300/80 bg-white/80 py-2.5 pl-10 pr-3 text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100"
-              placeholder="Search habits"
-            />
-          </div>
-
-          <div className="inline-flex items-center rounded-xl border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
-            <Filter className="ml-2 mr-1 h-4 w-4 text-slate-400" />
-            {['all', 'pending', 'upcoming', 'overdue', 'completed'].map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium capitalize transition ${
-                  statusFilter === status
-                    ? 'btn-brand text-white'
-                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-                }`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
         </div>
 
-        {successMessage ? (
-          <div className="mb-4 rounded-xl border border-emerald-300/60 bg-emerald-100/60 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-900/30 dark:text-emerald-300">
-            {successMessage}
+        <section className="relative mb-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white/80 p-5 shadow-[0_24px_50px_rgba(15,23,42,0.14)] backdrop-blur-sm dark:border-slate-700/80 dark:bg-slate-900/70">
+          <div className="pointer-events-none absolute -right-10 -top-20 h-56 w-56 rounded-full bg-indigo-400/20 blur-3xl dark:bg-indigo-500/25" />
+          <div className="pointer-events-none absolute -bottom-14 -left-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl dark:bg-cyan-500/25" />
+
+          <div className="relative z-10">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  <Sparkles className="h-4 w-4" />
+                  Smart Working Task
+                </p>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Current time {currentTimeLabel}</p>
+              </div>
+
+              {workingTaskMeta ? (
+                <span className={`rounded-full px-3 py-1 text-xs font-medium ${workingTaskMeta.badgeClass}`}>
+                  {workingTaskMeta.badge}
+                </span>
+              ) : null}
+            </div>
+
+            {workingTask && workingTaskMeta ? (
+              <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[1.5fr_1fr]">
+                <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+                  <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{workingTask.habit.name}</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    {workingTask.habit.category} • {formatScheduleTime(workingTask.time)}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{workingTaskMeta.helperText}</p>
+
+                  {workingTask.habit.goal ? (
+                    <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
+                      Goal: <span className="font-medium">{workingTask.habit.goal}</span>
+                    </p>
+                  ) : null}
+
+                  {workingTask.habit.notes ? (
+                    <p className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      Motivation: {workingTask.habit.notes}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Quick Action</p>
+
+                  {workingTask.state !== 'done' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleCompleteHabit(workingTask.habit._id)}
+                      disabled={activeHabitId === workingTask.habit._id}
+                      className="btn-brand mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition disabled:opacity-60"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      {activeHabitId === workingTask.habit._id ? 'Marking...' : 'Mark as Completed'}
+                    </button>
+                  ) : workingTaskCompletionId ? (
+                    <button
+                      type="button"
+                      onClick={() => handleUndoCompletion(workingTask.habit._id)}
+                      className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-300 bg-indigo-100 px-4 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-200 dark:border-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                    >
+                      Undo Last Completion
+                    </button>
+                  ) : (
+                    <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+                      Nice work. You have completed today&apos;s scheduled tasks.
+                    </p>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-xl bg-slate-100 px-2 py-2 dark:bg-slate-800/70">
+                      <p className="text-xs text-slate-500 dark:text-slate-300">Pending</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{todayTaskSummary.pending}</p>
+                    </div>
+                    <div className="rounded-xl bg-rose-100/80 px-2 py-2 dark:bg-rose-900/25">
+                      <p className="text-xs text-rose-600 dark:text-rose-300">Overdue</p>
+                      <p className="text-sm font-semibold text-rose-700 dark:text-rose-200">{todayTaskSummary.overdue}</p>
+                    </div>
+                    <div className="rounded-xl bg-emerald-100/80 px-2 py-2 dark:bg-emerald-900/25">
+                      <p className="text-xs text-emerald-600 dark:text-emerald-300">Done</p>
+                      <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-200">{todayTaskSummary.completed}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-2xl border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                No scheduled habit for today. Add habit times and repeat days to enable smart task tracking.
+              </p>
+            )}
+
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-300">Today Timeline</p>
+
+              {timelineEntries.length ? (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {timelineEntries.map((entry, index) => {
+                    const isFocusedTask =
+                      workingTask &&
+                      workingTask.habit._id === entry.habit._id &&
+                      workingTask.time === entry.time;
+
+                    const chipClass = entry.isCompleted
+                      ? 'border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-300'
+                      : entry.isOverdue
+                        ? 'border-rose-300 bg-rose-100 text-rose-700 dark:border-rose-700/60 dark:bg-rose-900/30 dark:text-rose-300'
+                        : isFocusedTask
+                          ? 'border-sky-300 bg-sky-100 text-sky-700 dark:border-sky-700/60 dark:bg-sky-900/30 dark:text-sky-300'
+                          : 'border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200';
+
+                    return (
+                      <span
+                        key={`${entry.habit._id}-${entry.time}-${index}`}
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs ${chipClass}`}
+                      >
+                        <Clock3 className="h-3.5 w-3.5" />
+                        {formatScheduleTime(entry.time)} · {entry.habit.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500 dark:text-slate-300">No entries available for today.</p>
+              )}
+            </div>
           </div>
-        ) : null}
+        </section>
 
         {habitsError ? (
           <div className="mb-4 rounded-xl border border-amber-300/60 bg-amber-100/60 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/30 dark:text-amber-300">
@@ -441,6 +792,36 @@ export default function Dashboard() {
               <h2 className="font-display mb-4 text-xl font-bold text-slate-900 dark:text-slate-100">
                 Habit Studio
               </h2>
+
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="relative min-w-55 flex-1 sm:flex-none">
+                  <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    className="w-full rounded-xl border border-slate-300/80 bg-white/80 py-2.5 pl-10 pr-3 text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100"
+                    placeholder="Search habits"
+                  />
+                </div>
+
+                <div className="inline-flex items-center rounded-xl border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+                  <Filter className="ml-2 mr-1 h-4 w-4 text-slate-400" />
+                  {['all', 'pending', 'upcoming', 'overdue', 'completed'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => setStatusFilter(status)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-medium capitalize transition ${
+                        statusFilter === status
+                          ? 'btn-brand text-white'
+                          : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <HabitList
                 habits={filteredHabits}
                 loading={habitsLoading}
@@ -459,6 +840,28 @@ export default function Dashboard() {
           </>
         ) : null}
       </main>
+
+      {toast ? (
+        <div className="pointer-events-none fixed right-4 top-4 z-60 w-[min(92vw,22rem)]">
+          <div className={`pointer-events-auto overflow-hidden rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-sm ${toastClassName}`}>
+            <div className="flex items-start gap-2">
+              <div className="mt-0.5">
+                {toast.type === 'success' ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : toast.type === 'error' ? (
+                  <AlertTriangle className="h-4 w-4" />
+                ) : (
+                  <Clock3 className="h-4 w-4" />
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{toast.title}</p>
+                {toast.message ? <p className="mt-0.5 text-xs opacity-90">{toast.message}</p> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <AddHabitModal
         isOpen={modalOpen}

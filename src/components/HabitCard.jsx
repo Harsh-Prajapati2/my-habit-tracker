@@ -1,11 +1,11 @@
 import React from 'react';
-import { Check, CircleAlert, CircleCheckBig, Clock3, Flame, Pencil, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, CircleAlert, CircleCheckBig, Clock3, FileText, Flame, Pencil, RotateCcw, Target, Trash2 } from 'lucide-react';
 
 const getStatus = (habit, isCompleted) => {
   if (isCompleted) {
     return {
       label: 'Completed',
-      className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+      className: 'status-completed',
       icon: <CircleCheckBig className="h-3.5 w-3.5" />,
     };
   }
@@ -17,7 +17,7 @@ const getStatus = (habit, isCompleted) => {
   if (!sortedTimes.length) {
     return {
       label: 'Pending',
-      className: 'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
+      className: 'status-pending',
       icon: <Clock3 className="h-3.5 w-3.5" />,
     };
   }
@@ -29,21 +29,20 @@ const getStatus = (habit, isCompleted) => {
   if (currentMinutes > scheduledMinutes) {
     return {
       label: 'Overdue',
-      className: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+      className: 'status-overdue',
       icon: <CircleAlert className="h-3.5 w-3.5" />,
     };
   }
 
   return {
     label: 'Upcoming',
-    className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    className: 'status-upcoming',
     icon: <Clock3 className="h-3.5 w-3.5" />,
   };
 };
 
 export default function HabitCard({
   habit,
-  cardStyle = 'glass',
   streak,
   isCompleted,
   isMarking,
@@ -54,65 +53,103 @@ export default function HabitCard({
   onDelete,
 }) {
   const status = getStatus(habit, isCompleted);
-  const cardClassByStyle = {
-    glass: 'premium-panel rounded-2xl p-4 transition hover:-translate-y-0.5',
-    solid:
-      'rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-[0_12px_24px_rgba(15,23,42,0.14)] transition hover:-translate-y-0.5 dark:border-slate-700 dark:bg-slate-900',
-    outline:
-      'rounded-2xl border-2 border-slate-300 bg-transparent p-4 shadow-[0_8px_20px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 dark:border-slate-600',
+  const sortedTimes = [...(habit.scheduledTimes || [])].sort();
+  const primaryTime = sortedTimes[0] || '';
+
+  // Format time to 12-hour format
+  const formatTime = (time) => {
+    if (!time) return '';
+    const [hh, mm] = time.split(':').map(Number);
+    const period = hh >= 12 ? 'PM' : 'AM';
+    const hour12 = hh % 12 || 12;
+    return `${hour12}:${String(mm).padStart(2, '0')} ${period}`;
   };
-  const cardClass = cardClassByStyle[cardStyle] || cardClassByStyle.glass;
 
   return (
-    <article
-      className={cardClass}
-      style={{ borderTop: `4px solid ${habit.color || '#3b82f6'}` }}
+    <article 
+      className="card group relative"
+      style={{ 
+        borderTop: `3px solid ${habit.color || 'var(--accent)'}` 
+      }}
     >
+      {/* Header */}
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{habit.name}</h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{habit.category}</p>
+        <div className="min-w-0 flex-1">
+          {primaryTime && (
+            <span className="badge badge-neutral badge-pill mb-2 inline-flex items-center gap-1">
+              <Clock3 className="h-3 w-3" />
+              {formatTime(primaryTime)}
+            </span>
+          )}
+          <h3 className="text-lg font-semibold text-[var(--text-primary)] truncate">
+            {habit.name}
+          </h3>
+          <p className="text-sm text-[var(--text-secondary)] mt-0.5">
+            {habit.category}
+          </p>
         </div>
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${status.className}`}>
+        
+        <span className={`badge badge-pill flex-shrink-0 ${status.className}`}>
           {status.icon}
           {status.label}
         </span>
       </div>
 
-      {habit.description ? (
-        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{habit.description}</p>
-      ) : null}
+      {/* Description */}
+      {habit.description && (
+        <p className="mt-3 text-sm text-[var(--text-secondary)] line-clamp-2">
+          {habit.description}
+        </p>
+      )}
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        {(habit.scheduledTimes || []).map((time) => (
-          <span
-            key={time}
-            className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-700 dark:bg-slate-800/80 dark:text-slate-200"
-          >
-            <Clock3 className="h-3.5 w-3.5" />
-            {time}
-          </span>
-        ))}
-      </div>
+      {/* Schedule Times */}
+      {sortedTimes.length > 1 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {sortedTimes.map((time) => (
+            <span
+              key={time}
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--bg-subtle)] px-2 py-1 text-xs text-[var(--text-secondary)]"
+            >
+              <Clock3 className="h-3 w-3" />
+              {formatTime(time)}
+            </span>
+          ))}
+        </div>
+      )}
 
-      <div className="mt-3 flex items-center justify-between">
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 dark:text-orange-300">
-          <Flame className="h-3.5 w-3.5" />
-          Streak {streak}
+      {/* Streak */}
+      <div className="mt-3 flex items-center">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--warning)]">
+          <Flame className="h-4 w-4" />
+          {streak} day streak
         </span>
-        {habit.goal ? (
-          <span className="rounded-lg bg-indigo-100 px-2 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-            Goal: {habit.goal}
-          </span>
-        ) : null}
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-2">
+      {/* Goal & Notes */}
+      {(habit.goal || habit.notes) && (
+        <div className="mt-3 space-y-2">
+          {habit.goal && (
+            <div className="inline-flex items-center gap-1.5 rounded-md bg-[var(--info-bg)] px-2.5 py-1.5 text-xs font-medium text-[var(--info)]">
+              <Target className="h-3.5 w-3.5" />
+              Goal: {habit.goal}
+            </div>
+          )}
+          {habit.notes && (
+            <div className="flex items-start gap-1.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2.5 py-2 text-xs text-[var(--text-secondary)]">
+              <FileText className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span className="line-clamp-2">{habit.notes}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="mt-4 flex items-center justify-between gap-2 pt-3 border-t border-[var(--border-subtle)]">
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => onEdit(habit)}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="btn btn-ghost btn-sm"
           >
             <Pencil className="h-4 w-4" />
             Edit
@@ -120,10 +157,9 @@ export default function HabitCard({
           <button
             type="button"
             onClick={() => onDelete(habit._id)}
-            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-1.5 text-sm text-rose-700 hover:bg-rose-50 dark:border-rose-800/50 dark:text-rose-300 dark:hover:bg-rose-900/30"
+            className="btn btn-sm text-[var(--error)] hover:bg-[var(--error-bg)]"
           >
             <Trash2 className="h-4 w-4" />
-            Delete
           </button>
         </div>
 
@@ -131,14 +167,30 @@ export default function HabitCard({
           type="button"
           disabled={(!hasUndo && isCompleted) || isMarking}
           onClick={() => (hasUndo && isCompleted ? onUndo(habit._id) : onComplete(habit._id))}
-          className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+          className={`btn btn-sm press-effect ${
             isCompleted
-              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-              : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60'
+              ? 'bg-[var(--success-bg)] text-[var(--success)] border border-[var(--success-border)]'
+              : 'btn-primary'
           }`}
         >
-          {hasUndo && isCompleted ? <RotateCcw className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-          {hasUndo && isCompleted ? 'Undo' : isCompleted ? 'Done' : isMarking ? 'Marking...' : 'Mark'}
+          {hasUndo && isCompleted ? (
+            <>
+              <RotateCcw className="h-4 w-4" />
+              Undo
+            </>
+          ) : isCompleted ? (
+            <>
+              <Check className="h-4 w-4" />
+              Done
+            </>
+          ) : isMarking ? (
+            'Marking...'
+          ) : (
+            <>
+              <Check className="h-4 w-4" />
+              Complete
+            </>
+          )}
         </button>
       </div>
     </article>

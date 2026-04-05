@@ -1,0 +1,17 @@
+{
+  "name": "StreakUp - Habit Tracker",
+  "short_name": "StreakUp",
+  "description": "Track your daily habits with style",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050816",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
