@@ -646,7 +646,7 @@ export default function DashboardOptimized() {
               </h2>
 
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                <div className="relative min-w-[220px] flex-1 sm:flex-none">
+                <div className="relative min-w-\[220px] flex-1 sm:flex-none">
                   <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
                   <input
                     value={searchQuery}
