@@ -417,6 +417,12 @@ export default function DashboardOptimized() {
               <ListTodo className="h-4 w-4" />
             </button>
             <button
+              onClick={() => navigate('/goals')}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <Target className="h-4 w-4" />
+            </button>
+            <button
               onClick={handleLogout}
               className="inline-flex items-center gap-2 rounded-xl border border-rose-300/60 bg-rose-100/70 px-4 py-2 text-rose-700 transition hover:bg-rose-200/70 dark:border-rose-700/50 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/45"
             >

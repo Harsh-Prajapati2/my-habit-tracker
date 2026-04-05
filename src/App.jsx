@@ -9,6 +9,7 @@ const RegisterPage = lazy(() => import('./pages/Register'));
 const DashboardPage = lazy(() => import('./pages/DashboardOptimized')); // Use optimized version
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const TaskManagerPage = lazy(() => import('./pages/TaskManager'));
+const GoalsPage = lazy(() => import('./pages/Goals'));
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -66,6 +67,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute>
               <TaskManagerPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/goals"
+          element={
+            <ProtectedRoute>
+              <GoalsPage />
             </ProtectedRoute>
           }
         />

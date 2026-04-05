@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   ListTodo,
   Plus,
@@ -168,6 +170,10 @@ export default function TaskManager() {
   const [draftSubtasks, setDraftSubtasks] = useState([]);
 
   const [toast, setToast] = useState(null);
+  
+  // Collapsible sections state
+  const [habitFocusExpanded, setHabitFocusExpanded] = useState(true);
+  const [addTaskExpanded, setAddTaskExpanded] = useState(false);
 
   const showToast = useCallback((type, title, message = '') => {
     setToast({ id: Date.now(), type, title, message });
@@ -399,43 +405,74 @@ export default function TaskManager() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <section className="relative mb-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white/80 p-5 shadow-[0_24px_50px_rgba(15,23,42,0.14)] backdrop-blur-sm dark:border-slate-700/80 dark:bg-slate-900/70">
+        <section className="relative mb-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white/80 shadow-[0_24px_50px_rgba(15,23,42,0.14)] backdrop-blur-sm dark:border-slate-700/80 dark:bg-slate-900/70">
           <div className="pointer-events-none absolute -right-10 -top-20 h-56 w-56 rounded-full bg-indigo-400/20 blur-3xl dark:bg-indigo-500/25" />
           <div className="pointer-events-none absolute -bottom-14 -left-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl dark:bg-cyan-500/25" />
 
           <div className="relative z-10">
-            <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <Sparkles className="h-4 w-4" />
-              Habit Focus at This Time
-            </p>
-            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Current time {currentTimeLabel}</p>
-
-            {workingHabit && workingHabitMeta ? (
-              <div className="mt-3 rounded-2xl border border-slate-200 bg-white/85 p-4 dark:border-slate-700 dark:bg-slate-900/70">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100">{workingHabit.habit.name}</p>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${workingHabitMeta.badgeClass}`}>
-                    {workingHabitMeta.badge}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  {workingHabit.habit.category} • {formatScheduleTime(workingHabit.time)}
+            <div 
+              className="flex cursor-pointer items-center justify-between p-5"
+              onClick={() => setHabitFocusExpanded(!habitFocusExpanded)}
+            >
+              <div>
+                <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  <Sparkles className="h-4 w-4" />
+                  Habit Focus at This Time
                 </p>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{workingHabitMeta.helper}</p>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Current time {currentTimeLabel}</p>
               </div>
-            ) : (
-              <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-                No habit is scheduled for today right now.
-              </p>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+              >
+                {habitFocusExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+            </div>
+
+            {habitFocusExpanded && (
+              <div className="px-5 pb-5">
+                {workingHabit && workingHabitMeta ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-base font-semibold text-slate-900 dark:text-slate-100">{workingHabit.habit.name}</p>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${workingHabitMeta.badgeClass}`}>
+                        {workingHabitMeta.badge}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                      {workingHabit.habit.category} • {formatScheduleTime(workingHabit.time)}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{workingHabitMeta.helper}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    No habit is scheduled for today right now.
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </section>
 
-        <section className="premium-panel mb-6 rounded-2xl p-5">
-          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-slate-100">Add Main Task</h2>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Tasks are saved to IndexedDB in your browser.</p>
+        <section className="premium-panel mb-6 rounded-2xl">
+          <div 
+            className="flex cursor-pointer items-center justify-between p-5"
+            onClick={() => setAddTaskExpanded(!addTaskExpanded)}
+          >
+            <div>
+              <h2 className="font-display text-xl font-bold text-slate-900 dark:text-slate-100">Add Main Task</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Tasks are saved to IndexedDB in your browser.</p>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+            >
+              {addTaskExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+          </div>
 
-          <form onSubmit={handleCreateTask} className="mt-4 space-y-3">
+          {addTaskExpanded && (
+            <form onSubmit={handleCreateTask} className="px-5 pb-5 space-y-3">
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Main Task</label>
               <input
@@ -489,14 +526,15 @@ export default function TaskManager() {
               </div>
             ) : null}
 
-            <button
-              type="submit"
-              className="btn-brand inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium"
-            >
-              <ListTodo className="h-4 w-4" />
-              Create Task
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="btn-brand inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium"
+              >
+                <ListTodo className="h-4 w-4" />
+                Create Task
+              </button>
+            </form>
+          )}
         </section>
 
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
