@@ -64,4 +64,26 @@ export const statsAPI = {
   dashboard: () => apiClient.get('/stats/dashboard'),
 };
 
+// Task Endpoints
+export const tasksAPI = {
+  createTopic: (data) => apiClient.post('/tasks/topics', data),
+  create: (data) => apiClient.post('/tasks', data),
+  getAll: () => apiClient.get('/tasks'),
+  getTopics: () => apiClient.get('/tasks/topics'),
+  update: (id, data) => apiClient.put(`/tasks/${id}`, data),
+  toggleComplete: (id) => apiClient.patch(`/tasks/${id}/toggle-complete`),
+  delete: (id) => apiClient.delete(`/tasks/${id}`),
+};
+
+// Goal Endpoints
+export const goalsAPI = {
+  createTopic: (data) => apiClient.post('/goals/topics', data),
+  create: (data) => apiClient.post('/goals', data),
+  getAll: () => apiClient.get('/goals'),
+  getTopics: () => apiClient.get('/goals/topics'),
+  update: (id, data) => apiClient.put(`/goals/${id}`, data),
+  toggleComplete: (id) => apiClient.patch(`/goals/${id}/toggle-complete`),
+  delete: (id) => apiClient.delete(`/goals/${id}`),
+};
+
 export default apiClient;

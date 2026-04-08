@@ -20,6 +20,11 @@ export function initDB() {
       return;
     }
 
+    if (typeof indexedDB === 'undefined') {
+      resolve(null);
+      return;
+    }
+
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => reject(request.error);
@@ -56,6 +61,7 @@ export function initDB() {
 // Generic store operations
 async function getStore(storeName, mode = 'readonly') {
   if (!db) await initDB();
+  if (!db) return null;
   const tx = db.transaction(storeName, mode);
   return tx.objectStore(storeName);
 }
@@ -64,6 +70,7 @@ async function getStore(storeName, mode = 'readonly') {
 export async function cacheDashboard(data) {
   try {
     const store = await getStore(STORES.DASHBOARD, 'readwrite');
+    if (!store) return;
     const record = {
       key: 'dashboard',
       data,
@@ -78,6 +85,7 @@ export async function cacheDashboard(data) {
 export async function getCachedDashboard(maxAge = 5 * 60 * 1000) {
   try {
     const store = await getStore(STORES.DASHBOARD);
+    if (!store) return null;
     return new Promise((resolve) => {
       const request = store.get('dashboard');
       request.onsuccess = () => {
@@ -104,6 +112,7 @@ export async function getCachedDashboard(maxAge = 5 * 60 * 1000) {
 export async function cacheHabits(habits) {
   try {
     const store = await getStore(STORES.HABITS, 'readwrite');
+    if (!store) return;
     // Clear existing and add new
     store.clear();
     for (const habit of habits) {
@@ -117,6 +126,7 @@ export async function cacheHabits(habits) {
 export async function getCachedHabits() {
   try {
     const store = await getStore(STORES.HABITS);
+    if (!store) return [];
     return new Promise((resolve) => {
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result || []);
@@ -131,6 +141,7 @@ export async function getCachedHabits() {
 export async function queueOfflineAction(action) {
   try {
     const store = await getStore(STORES.OFFLINE_QUEUE, 'readwrite');
+    if (!store) return false;
     const record = {
       ...action,
       timestamp: Date.now(),
@@ -147,6 +158,7 @@ export async function queueOfflineAction(action) {
 export async function getOfflineQueue() {
   try {
     const store = await getStore(STORES.OFFLINE_QUEUE);
+    if (!store) return [];
     return new Promise((resolve) => {
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result || []);
@@ -160,6 +172,7 @@ export async function getOfflineQueue() {
 export async function removeFromQueue(id) {
   try {
     const store = await getStore(STORES.OFFLINE_QUEUE, 'readwrite');
+    if (!store) return;
     store.delete(id);
   } catch (err) {
     console.warn('Failed to remove from queue:', err);
@@ -169,6 +182,7 @@ export async function removeFromQueue(id) {
 export async function clearOfflineQueue() {
   try {
     const store = await getStore(STORES.OFFLINE_QUEUE, 'readwrite');
+    if (!store) return;
     store.clear();
   } catch (err) {
     console.warn('Failed to clear queue:', err);
