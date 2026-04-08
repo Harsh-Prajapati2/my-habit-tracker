@@ -159,6 +159,16 @@ export async function createTaskTopic(topicData) {
   return response?.data?.data;
 }
 
+export async function updateTaskTopic(topicId, topicData) {
+  const response = await tasksAPI.updateTopic(topicId, topicData);
+  return response?.data?.data;
+}
+
+export async function deleteTaskTopic(topicId) {
+  const response = await tasksAPI.deleteTopic(topicId);
+  return response?.data?.data;
+}
+
 export async function createTaskItem(taskData) {
   const payload = normalizeTaskPayload(taskData);
   const response = await tasksAPI.create(payload);

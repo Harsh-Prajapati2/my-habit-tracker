@@ -179,6 +179,16 @@ export const createGoalTopic = async (topicData) => {
   return response?.data?.data;
 };
 
+export const updateGoalTopic = async (topicId, topicData) => {
+  const response = await goalsAPI.updateTopic(topicId, topicData);
+  return response?.data?.data;
+};
+
+export const deleteGoalTopic = async (topicId) => {
+  const response = await goalsAPI.deleteTopic(topicId);
+  return response?.data?.data;
+};
+
 export const listGoals = async () => {
   const response = await goalsAPI.getAll();
   const items = response?.data?.data || [];

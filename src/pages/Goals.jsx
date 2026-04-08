@@ -4,26 +4,31 @@ import {
   AlertTriangle,
   ArrowLeft,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
   Flag,
+  Pencil,
   Plus,
   Target,
   Trash2,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import {
   createGoal,
   createGoalTopic,
   deleteGoal,
+  deleteGoalTopic,
   getDaysRemaining,
   getGoalProgress,
   isGoalCompleted,
   isGoalOverdue,
   listGoals,
   listGoalTopics,
+  updateGoalTopic,
   updateGoal,
 } from '../utils/goalsDb';
 
@@ -92,6 +97,9 @@ export default function Goals() {
   const [showGoalTopicManager, setShowGoalTopicManager] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedGoalIds, setExpandedGoalIds] = useState(new Set());
+  const [editingGoalTopicId, setEditingGoalTopicId] = useState('');
+  const [editingGoalTopicName, setEditingGoalTopicName] = useState('');
+  const [activeGoalTopicActionId, setActiveGoalTopicActionId] = useState('');
 
   const [goalTitle, setGoalTitle] = useState('');
   const [goalTopicInput, setGoalTopicInput] = useState('');
@@ -190,6 +198,107 @@ export default function Goals() {
       showToast('success', 'Goal main topic ready', `${created.name} is available for goals`);
     } catch (error) {
       showToast('error', 'Topic creation failed', error?.message);
+    }
+  };
+
+  const stopEditingGoalTopic = useCallback(() => {
+    setEditingGoalTopicId('');
+    setEditingGoalTopicName('');
+  }, []);
+
+  const handleStartGoalTopicEdit = (topic) => {
+    setEditingGoalTopicId(topic.id);
+    setEditingGoalTopicName(topic.name);
+    setShowGoalTopicManager(true);
+  };
+
+  const handleSaveGoalTopicEdit = async (topic) => {
+    const nextName = editingGoalTopicName.trim();
+    if (!nextName) {
+      showToast('error', 'Goal main topic name is required');
+      return;
+    }
+
+    setActiveGoalTopicActionId(topic.id);
+
+    try {
+      const updated = await updateGoalTopic(topic.id, { name: nextName });
+
+      setGoalTopics((prev) =>
+        sortTopicsByName(prev.map((item) => (item.id === topic.id ? updated : item)))
+      );
+      setGoals((prev) =>
+        prev.map((goal) =>
+          getGoalMainTopic(goal).toLowerCase() === topic.name.toLowerCase()
+            ? { ...goal, mainTopic: updated.name, category: updated.name }
+            : goal
+        )
+      );
+      setSelectedGoalTopic((prev) => (prev === topic.name ? updated.name : prev));
+      stopEditingGoalTopic();
+      showToast('success', 'Goal topic updated', `${topic.name} renamed to ${updated.name}`);
+    } catch (error) {
+      showToast(
+        'error',
+        'Topic update failed',
+        error?.response?.data?.message || error?.message || 'Could not update goal topic'
+      );
+    } finally {
+      setActiveGoalTopicActionId('');
+    }
+  };
+
+  const handleDeleteGoalTopic = async (topic) => {
+    const usageCount = goalTopicUsage[topic.name] || 0;
+    const confirmationMessage = usageCount
+      ? `Delete "${topic.name}"? ${usageCount} goal${usageCount === 1 ? '' : 's'} will be moved to General.`
+      : `Delete "${topic.name}"?`;
+
+    if (!window.confirm(confirmationMessage)) {
+      return;
+    }
+
+    setActiveGoalTopicActionId(topic.id);
+
+    try {
+      const result = await deleteGoalTopic(topic.id);
+      const fallbackTopic = result?.reassignedTopic || null;
+
+      setGoalTopics((prev) => {
+        const withoutDeleted = prev.filter((item) => item.id !== topic.id);
+        return fallbackTopic ? upsertTopic(withoutDeleted, fallbackTopic) : sortTopicsByName(withoutDeleted);
+      });
+      setGoals((prev) =>
+        fallbackTopic
+          ? prev.map((goal) =>
+              getGoalMainTopic(goal).toLowerCase() === topic.name.toLowerCase()
+                ? { ...goal, mainTopic: fallbackTopic.name, category: fallbackTopic.name }
+                : goal
+            )
+          : prev
+      );
+      setSelectedGoalTopic((prev) => {
+        if (prev !== topic.name) return prev;
+        return fallbackTopic?.name || '';
+      });
+
+      if (editingGoalTopicId === topic.id) {
+        stopEditingGoalTopic();
+      }
+
+      showToast(
+        'success',
+        'Goal topic deleted',
+        fallbackTopic ? `${topic.name} goals moved to ${fallbackTopic.name}` : `${topic.name} removed`
+      );
+    } catch (error) {
+      showToast(
+        'error',
+        'Topic delete failed',
+        error?.response?.data?.message || error?.message || 'Could not delete goal topic'
+      );
+    } finally {
+      setActiveGoalTopicActionId('');
     }
   };
 
@@ -334,6 +443,15 @@ export default function Goals() {
   );
   const todoGoalGroups = useMemo(() => groupGoalsByMainTopic(todoGoals), [todoGoals]);
   const completedGoalGroups = useMemo(() => groupGoalsByMainTopic(completedGoals), [completedGoals]);
+  const goalTopicUsage = useMemo(
+    () =>
+      goals.reduce((usage, goal) => {
+        const topic = getGoalMainTopic(goal);
+        usage[topic] = (usage[topic] || 0) + 1;
+        return usage;
+      }, {}),
+    [goals]
+  );
 
   const toastClassName =
     toast?.type === 'success'
@@ -671,22 +789,96 @@ export default function Goals() {
                   <div className="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
                     {goalTopics.map((topic) => {
                       const isSelected = selectedGoalTopic === topic.name;
+                      const isEditing = editingGoalTopicId === topic.id;
+                      const isBusy = activeGoalTopicActionId === topic.id;
+                      const usageCount = goalTopicUsage[topic.name] || 0;
+
+                      if (isEditing) {
+                        return (
+                          <div
+                            key={topic.id}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-indigo-300 bg-indigo-50 px-3 py-2 dark:border-indigo-700 dark:bg-indigo-900/25"
+                          >
+                            <input
+                              value={editingGoalTopicName}
+                              onChange={(event) => setEditingGoalTopicName(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  handleSaveGoalTopicEdit(topic);
+                                }
+                                if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  stopEditingGoalTopic();
+                                }
+                              }}
+                              className="min-w-[11rem] rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-sm text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-indigo-700 dark:bg-slate-900 dark:text-slate-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveGoalTopicEdit(topic)}
+                              disabled={isBusy}
+                              className="rounded-full bg-emerald-100 p-1.5 text-emerald-700 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-900/35 dark:text-emerald-300"
+                              aria-label={`Save ${topic.name}`}
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopEditingGoalTopic}
+                              disabled={isBusy}
+                              className="rounded-full bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300"
+                              aria-label={`Cancel editing ${topic.name}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      }
+
                       return (
-                        <button
+                        <div
                           key={topic.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedGoalTopic(topic.name);
-                            setShowAddForm(true);
-                          }}
-                          className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition ${
+                          className={`inline-flex items-center gap-1 rounded-full border p-1 ${
                             isSelected
                               ? 'border-indigo-500 bg-indigo-100 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-900/35 dark:text-indigo-200'
-                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
+                              : 'border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
                           }`}
                         >
-                          {topic.name}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedGoalTopic(topic.name);
+                              setShowAddForm(true);
+                            }}
+                            className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-sm transition hover:bg-white/70 dark:hover:bg-slate-800"
+                          >
+                            <span>{topic.name}</span>
+                            <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {usageCount}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStartGoalTopicEdit(topic)}
+                            disabled={isBusy}
+                            className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-white"
+                            aria-label={`Edit ${topic.name}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteGoalTopic(topic)}
+                            disabled={isBusy}
+                            className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-700/60 dark:bg-rose-900/25 dark:text-rose-200 dark:hover:bg-rose-900/40"
+                            aria-label={`Delete ${topic.name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
